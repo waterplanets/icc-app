@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}总览 · ICC 工作台{% endblock %}
+{% block content %}
+<div class="panel-head">
+  <div>
+    <h1>总览</h1>
+    <p class="hint">最近一次行情快照：{{ last_sync or '尚未同步' }}</p>
+  </div>
+  <form action="/sync" method="post" class="inline">
+    <button type="submit">同步行情</button>
+  </form>
+</div>
+
+<div class="cards" style="margin-bottom:18px">
+  {% for ix in indices %}
+  <div class="card">
+    <div class="k">{{ ix.name }}</div>
+    <div class="v {{ ix.pct|sign_cls }}">{{ ix.price|money }}</div>
+    <div class="d {{ ix.pct|sign_cls }}">{{ ix.pct|pct }} <span class="hint">{{ ix.date or '' }}</span></div>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="cards" style="margin-bottom:18px">
+  <div class="card">
+    <div class="k">账户净值</div>
+    <div class="v">{{ pf.equity|money }}</div>
+    <div class="d {{ pf.total_pnl|sign_cls }}">累计 {{ pf.total_pnl|money }}（{{ pf.total_pnl_pct|pct }}）</div>
+  </div>
+  <div class="card">
+    <div class="k">可用资金</div>
+    <div class="v">{{ pf.cash|money }}</div>
+    <div class="d">占比 {{ pf.cash_ratio }}%</div>
+  </div>
+  <div class="card">
+    <div class="k">持仓市值</div>
+    <div class="v">{{ pf.market_value|money }}</div>
+    <div class="d">{{ pf.positions|length }} 个标的</div>
+  </div>
+  <div class="card">
+    <div class="k">初始资金</div>
+    <div class="v">{{ pf.initial_cash|money }}</div>
+    <div class="d">虚拟盘，含交易费用</div>
+  </div>
+</div>
+
+<div class="two">
+  <section class="panel">
+    <div class="panel-head">
+      <h2>持仓</h2>
+      <a href="/positions">全部 →</a>
+    </div>
+    <table>
+      <thead><tr><th>标的</th><th>数量</th><th>成本</th><th>现价</th><th>浮盈</th></tr></thead>
+      <tbody>
+      {% for p in pf.positions[:6] %}
+        <tr>
+          <td>{{ p.name }}<br><span class="hint">{{ p.symbol }}</span></td>
+          <td>{{ p.qty }}</td>
+          <td>{{ p.avg_cost|money(3) }}</td>
+          <td>{{ p.price|money(3) }}</td>
+          <td class="{{ p.pnl|sign_cls }}">{{ p.pnl|money }}<br>{{ p.pnl_pct|pct }}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="5" class="empty">还没有持仓，去 <a href="/trade">交易</a> 下第一单。</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>最近成交</h2>
+      <a href="/trades">全部 →</a>
+    </div>
+    <table>
+      <thead><tr><th>时间</th><th>标的</th><th>方向</th><th>数量</th><th>价格</th><th>费用</th></tr></thead>
+      <tbody>
+      {% for t in trades %}
+        <tr>
+          <td>{{ t.ts }}</td>
+          <td>{{ t.name or t.symbol }}</td>
+          <td><span class="tag {{ t.side }}">{{ '买入' if t.side == 'buy' else '卖出' }}</span></td>
+          <td>{{ t.qty }}</td>
+          <td>{{ t.price|money(3) }}</td>
+          <td>{{ t.fee|money }}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="6" class="empty">暂无成交记录。</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </section>
+</div>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>自选股</h2>
+    <a href="/watchlist">管理 →</a>
+  </div>
+  <table>
+    <thead><tr><th>标的</th><th>分组</th><th>现价</th><th>涨跌幅</th><th>最新日线</th></tr></thead>
+    <tbody>
+    {% for r in rows[:10] %}
+      <tr>
+        <td><a href="/kline?symbol={{ r.symbol }}">{{ r.qname or r.iname or r.symbol }}</a><br><span class="hint">{{ r.symbol }}</span></td>
+        <td><span class="tag">{{ r.group_name }}</span></td>
+        <td>{{ (r.price if r.price is not none else r.last_close)|money }}</td>
+        <td class="{{ r.pct|sign_cls }}">{{ r.pct|pct }}</td>
+        <td>{{ r.last_date or '—' }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="5" class="empty">自选股为空。</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

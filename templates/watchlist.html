@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}自选股 · ICC 工作台{% endblock %}
+{% block content %}
+<div class="panel-head">
+  <div>
+    <h1>自选股</h1>
+    <p class="hint">添加时会自动拉取名称与近 3 年日线；删除只移出自选，持仓与历史日线保留。价格与涨跌幅按虚拟当前时间 {{ asof }} 截止。</p>
+  </div>
+</div>
+
+<section class="panel">
+  <h2>添加标的</h2>
+  <form action="/watchlist/add" method="post" class="inline">
+    <input name="symbol" placeholder="代码，如 600519 或 600519.SH" required style="width:230px">
+    <input name="name" placeholder="名称（留空自动获取）" style="width:200px">
+    <input name="group_name" placeholder="分组（默认 自选）" style="width:150px" list="grp">
+    <datalist id="grp">
+      {% for g in groups %}<option value="{{ g }}">{% endfor %}
+    </datalist>
+    <button type="submit">添加</button>
+  </form>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>清单（{{ rows|length }}）</h2>
+    <form action="/snapshot" method="post" class="inline">
+      <button type="submit" class="ghost">刷新快照</button>
+    </form>
+  </div>
+  <table>
+    <thead>
+      <tr><th>标的</th><th>分组</th><th>现价</th><th>涨跌幅</th><th>最新日线</th><th>快照时间</th><th>操作</th></tr>
+    </thead>
+    <tbody>
+    {% for r in rows %}
+      <tr>
+        <td><a href="/kline?symbol={{ r.symbol }}">{{ r.qname or r.iname or r.symbol }}</a><br><span class="hint">{{ r.symbol }}</span></td>
+        <td>
+          <form action="/watchlist/group" method="post" class="inline">
+            <input type="hidden" name="symbol" value="{{ r.symbol }}">
+            <input name="group_name" value="{{ r.group_name }}" style="width:96px;padding:4px 8px">
+            <button type="submit" class="ghost" style="padding:4px 10px">改</button>
+          </form>
+        </td>
+        <td class="num">{{ (r.price if r.price is not none else r.last_close)|money }}</td>
+        <td class="num {{ r.pct|sign_cls }}">{{ r.pct|pct }}</td>
+        <td class="num">{{ r.last_date or '—' }}</td>
+        <td class="num">{{ r.updated_at or '—' }}</td>
+        <td>
+          <form action="/watchlist/delete" method="post" class="inline">
+            <input type="hidden" name="symbol" value="{{ r.symbol }}">
+            <button type="submit" class="danger" style="padding:4px 10px">移出</button>
+          </form>
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="7" class="empty">清单为空，用上方表单添加。</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}成交流水 · ICC 工作台{% endblock %}
+{% block content %}
+<div class="panel-head">
+  <div>
+    <h1>成交流水</h1>
+    <p class="hint">当前账户「{{ acc.name }}」，只显示成交日 ≤ {{ asof }} 的记录，含费用与卖出实现盈亏。</p>
+  </div>
+  <a href="/trade"><button type="button">继续下单</button></a>
+</div>
+
+<section class="panel">
+  <table>
+    <thead><tr><th>成交日</th><th>记录时间</th><th>标的</th><th>方向</th><th>数量</th><th>成交价</th><th>金额</th><th>费用</th><th>实现盈亏</th><th>备注</th></tr></thead>
+    <tbody>
+    {% for t in trades %}
+      <tr>
+        <td>{{ t.trade_date }}</td>
+        <td class="hint">{{ t.ts }}</td>
+        <td>{{ t.name or t.symbol }}<br><span class="hint">{{ t.symbol }}</span></td>
+        <td><span class="tag {{ t.side }}">{{ '买入' if t.side == 'buy' else '卖出' }}</span></td>
+        <td class="num">{{ t.qty }}</td>
+        <td class="num">{{ t.price|money(3) }}</td>
+        <td class="num">{{ t.amount|money }}</td>
+        <td class="num">{{ t.fee|money }}</td>
+        <td class="num {{ t.pnl|sign_cls }}">{{ t.pnl|money }}</td>
+        <td>{{ t.note or '—' }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="10" class="empty">还没有成交。</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

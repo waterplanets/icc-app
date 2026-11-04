@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}持仓 · ICC 工作台{% endblock %}
+{% block content %}
+<div class="panel-head">
+  <div>
+    <h1>持仓</h1>
+    <p class="hint">按虚拟当前时间 {{ asof }} 估值：{{ '实时模式用最新快照，无快照时退回最近收盘' if live else '回放模式只用该日及之前的日线收盘价' }}。</p>
+  </div>
+  <a href="/trade"><button type="button">去下单</button></a>
+</div>
+
+<div class="cards" style="margin-bottom:18px">
+  <div class="card">
+    <div class="k">净值</div>
+    <div class="v">{{ pf.equity|money }}</div>
+    <div class="d {{ pf.total_pnl|sign_cls }}">{{ pf.total_pnl|money }}（{{ pf.total_pnl_pct|pct }}）</div>
+  </div>
+  <div class="card">
+    <div class="k">现金</div>
+    <div class="v">{{ pf.cash|money }}</div>
+    <div class="d">仓位 {{ 100 - pf.cash_ratio }}%</div>
+  </div>
+  <div class="card">
+    <div class="k">持仓市值</div>
+    <div class="v">{{ pf.market_value|money }}</div>
+    <div class="d">{{ pf.positions|length }} 个标的</div>
+  </div>
+</div>
+
+<section class="panel">
+  <div class="panel-head"><h2>持仓明细</h2></div>
+  <table>
+    <thead>
+      <tr><th>标的</th><th>数量</th><th>成本价</th><th>现价</th><th>市值</th><th>权重</th><th>浮动盈亏</th></tr>
+    </thead>
+    <tbody>
+    {% for p in pf.positions %}
+      <tr>
+        <td>{{ p.name }}<br><span class="hint">{{ p.symbol }}</span></td>
+        <td class="num">{{ p.qty }}</td>
+        <td class="num">{{ p.avg_cost|money(3) }}</td>
+        <td class="num">{{ p.price|money(3) }}</td>
+        <td class="num">{{ p.value|money }}</td>
+        <td class="num">{{ p.weight }}%</td>
+        <td class="num {{ p.pnl|sign_cls }}">{{ p.pnl|money }}<br><span class="hint {{ p.pnl_pct|sign_cls }}">{{ p.pnl_pct|pct }}</span></td>
+      </tr>
+    {% else %}
+      <tr><td colspan="7" class="empty">当前空仓。</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<div class="two">
+  <section class="panel">
+    <div class="panel-head"><h2>费用模型</h2></div>
+    <table>
+      <tbody>
+        <tr><td>佣金</td><td class="num">{{ (fee.commission_rate * 100)|round(3) }}%，最低 {{ fee.commission_min }} 元</td></tr>
+        <tr><td>印花税（卖出）</td><td class="num">{{ (fee.stamp_tax_sell * 100)|round(3) }}%</td></tr>
+        <tr><td>过户费</td><td class="num">{{ (fee.transfer_fee * 100)|round(3) }}%</td></tr>
+        <tr><td>滑点</td><td class="num">{{ fee.slippage_bps }} bp</td></tr>
+        <tr><td>最小交易单位</td><td class="num">{{ fee.lot_size }} 股</td></tr>
+      </tbody>
+    </table>
+    <p class="hint">买入价 = 行情价 ×(1+滑点)，卖出价 = 行情价 ×(1−滑点)，费用从现金中扣除。</td>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head"><h2>重置账户</h2></div>
+    <p class="hint">清空持仓、成交流水与净值曲线，按输入金额重新开始。自选股与日线不受影响。</p>
+    <form action="/account/reset" method="post" class="inline" style="margin-top:10px">
+      <input name="cash" value="1000000" style="width:160px">
+      <button type="submit" class="danger">重置为初始资金</button>
+    </form>
+  </section>
+</div>
+{% endblock %}

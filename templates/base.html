@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}ICC 本地工作台{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">ICC 工作台<span class="sub">行情 · 自选 · 虚拟盘</span></div>
+  <nav>
+    <a href="/" class="{{ 'on' if page == 'home' else '' }}">总览</a>
+    <a href="/watchlist" class="{{ 'on' if page == 'watch' else '' }}">自选股</a>
+    <a href="/quotes" class="{{ 'on' if page == 'quotes' else '' }}">行情同步</a>
+    <a href="/positions" class="{{ 'on' if page == 'pos' else '' }}">持仓</a>
+    <a href="/trade" class="{{ 'on' if page == 'trade' else '' }}">交易</a>
+    <a href="/trades" class="{{ 'on' if page == 'trades' else '' }}">成交流水</a>
+    <a href="/equity" class="{{ 'on' if page == 'equity' else '' }}">净值</a>
+    <a href="/kline" class="{{ 'on' if page == 'kline' else '' }}">K 线</a>
+  </nav>
+</header>
+
+<div class="subbar">
+  <form action="/accounts/switch" method="post" class="inline">
+    <input type="hidden" name="next" value="{{ request.url.path }}">
+    <span class="k">账户</span>
+    <select name="account_id">
+      {% for a in accounts %}
+      <option value="{{ a.id }}" {{ 'selected' if a.id == acc.id else '' }}>{{ a.name }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit" class="ghost">切换</button>
+  </form>
+
+  <span class="sep"></span>
+
+  <span class="k">虚拟现在</span>
+  <strong class="{{ 'live' if live else 'replay' }}">{{ asof }}{{ '（实时）' if live else '（回放）' }}</strong>
+
+  <form action="/asof" method="post" class="inline">
+    <input type="hidden" name="next" value="{{ request.url.path }}">
+    <input type="hidden" name="action" value="next">
+    <button type="submit" class="ghost">前进一天</button>
+  </form>
+  <form action="/asof" method="post" class="inline">
+    <input type="hidden" name="next" value="{{ request.url.path }}">
+    <input type="hidden" name="action" value="today">
+    <button type="submit" class="ghost">回到今天</button>
+  </form>
+  <form action="/asof" method="post" class="inline">
+    <input type="hidden" name="next" value="{{ request.url.path }}">
+    <input type="hidden" name="action" value="set">
+    <input type="date" name="date" value="{{ asof }}" max="{{ asof if not live else '' }}">
+    <button type="submit" class="ghost">跳转</button>
+  </form>
+
+  <span class="sep"></span>
+
+  <form action="/accounts/create" method="post" class="inline">
+    <input type="hidden" name="next" value="/">
+    <input name="name" placeholder="新账户名" style="width:110px" required>
+    <input name="cash" placeholder="初始资金" value="1000000" style="width:120px">
+    <button type="submit" class="ghost">新建账户</button>
+  </form>
+</div>
+
+<main>
+  {% if msg %}<div class="flash">{{ msg }}</div>{% endif %}
+  {% block content %}{% endblock %}
+</main>
+<footer>本地模拟盘 · 不接实盘 · 行情源：东方财富（腾讯兜底） · 数据库：data/app.db</footer>
+</body>
+</html>

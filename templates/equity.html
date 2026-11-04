@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}净值 · ICC 工作台{% endblock %}
+{% block content %}
+<div class="panel-head">
+  <div>
+    <h1>净值曲线</h1>
+    <p class="hint">账户「{{ acc.name }}」，只统计虚拟当前时间 {{ asof }} 及之前的快照；成交当天也会即时落一条。基准为沪深300。</p>
+  </div>
+  <form action="/snapshot" method="post"><button type="submit" class="ghost">刷新快照并落净值</button></form>
+</div>
+
+<div class="cards" style="margin-bottom:18px">
+  <div class="card">
+    <div class="k">当前净值</div>
+    <div class="v">{{ pf.equity|money }}</div>
+    <div class="d {{ pf.total_pnl|sign_cls }}">累计 {{ pf.total_pnl_pct|pct }}</div>
+  </div>
+  <div class="card">
+    <div class="k">策略收益</div>
+    <div class="v {{ data.eq_ret|sign_cls }}">{{ data.eq_ret|pct }}</div>
+    <div class="d">自首条快照起</div>
+  </div>
+  <div class="card">
+    <div class="k">沪深300</div>
+    <div class="v {{ data.bench_ret|sign_cls }}">{{ data.bench_ret|pct }}</div>
+    <div class="d">同期归一化</div>
+  </div>
+  <div class="card">
+    <div class="k">超额</div>
+    <div class="v {{ (data.eq_ret - data.bench_ret if data.bench_ret is not none else 0)|sign_cls }}">
+      {{ (data.eq_ret - data.bench_ret)|pct if data.bench_ret is not none else '—' }}
+    </div>
+    <div class="d">策略 − 基准</div>
+  </div>
+</div>
+
+<section class="panel">
+  <div class="panel-head"><h2>曲线</h2></div>
+  {% if data.points %}
+  <div class="chart">
+    <svg viewBox="0 0 {{ data.width }} {{ data.height }}" width="{{ data.width }}" height="{{ data.height }}"
+         preserveAspectRatio="xMidYMid meet" role="img">
+      {% for g in data.grid %}
+      <line x1="{{ data.left }}" y1="{{ g.y }}" x2="{{ data.width - data.right }}" y2="{{ g.y }}"
+            stroke="#e3e8f0" stroke-width="1"></line>
+      <text x="{{ data.left - 8 }}" y="{{ g.y + 4 }}" text-anchor="end" font-size="11" fill="#6b7785">{{ g.label }}</text>
+      {% endfor %}
+      <line x1="{{ data.left }}" y1="{{ data.height - data.bottom }}" x2="{{ data.width - data.right }}"
+            y2="{{ data.height - data.bottom }}" stroke="#cfd8e5" stroke-width="1"></line>
+      {% if data.bench %}
+      <polyline fill="none" stroke="#9aa7ba" stroke-width="1.5" stroke-dasharray="5 4" points="{{ data.bench }}"></polyline>
+      {% endif %}
+      <polyline fill="none" stroke="#1f6feb" stroke-width="2" points="{{ data.points }}"></polyline>
+      <text x="{{ data.left }}" y="{{ data.height - 10 }}" font-size="11" fill="#6b7785">{{ data.labels[0] }}</text>
+      <text x="{{ data.width / 2 }}" y="{{ data.height - 10 }}" font-size="11" fill="#6b7785" text-anchor="middle">{{ data.labels[1] }}</text>
+      <text x="{{ data.width - data.right }}" y="{{ data.height - 10 }}" font-size="11" fill="#6b7785" text-anchor="end">{{ data.labels[2] }}</text>
+    </svg>
+  </div>
+  <div class="legend">
+    <span><i style="background:#1f6feb"></i>账户净值（累计收益）</span>
+    <span><i style="background:#9aa7ba"></i>沪深300（归一化）</span>
+  </div>
+  {% else %}
+  <p class="empty">净值快照不足两条，先同步行情或完成一笔交易。</p>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <div class="panel-head"><h2>快照明细</h2></div>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>日期</th><th>现金</th><th>持仓市值</th><th>净值</th><th>备注</th></tr></thead>
+      <tbody>
+      {% for e in data.curve|reverse|list %}
+        <tr>
+          <td>{{ e.date }}</td>
+          <td class="num">{{ e.cash|money }}</td>
+          <td class="num">{{ e.market_value|money }}</td>
+          <td class="num">{{ e.equity|money }}</td>
+          <td>{{ e.note or '—' }}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="5" class="empty">暂无快照。</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

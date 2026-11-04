@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# 本地运行数据（含账户、持仓、成交、净值，属于个人隐私，不提交）
+data/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# 本地配置与凭据
+.env
+.env.*
+*.local.json
+
+# 日志与临时文件
+logs/
+*.log
+.cache/
+.pytest_cache/
+
+# 编辑器
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}K 线 · ICC 工作台{% endblock %}
+{% block content %}
+<div class="panel-head">
+  <div>
+    <h1>K 线</h1>
+    <p class="hint">只显示到虚拟当前时间 {{ asof }} 为止的日线；{{ '实时模式下最新一根为当日或最近交易日' if live else '回放模式看不到该日期之后的任何数据' }}。</p>
+  </div>
+</div>
+
+<section class="panel">
+  <form action="/kline" method="get" class="inline">
+    <input name="symbol" value="{{ data.symbol }}" placeholder="600519.SH" style="width:180px">
+    <input name="n" value="{{ data.rows|length }}" style="width:90px" title="显示根数">
+    <button type="submit">查看</button>
+    <span class="hint">例：600519.SH / 000300.SH / 300750.SZ</span>
+  </form>
+</section>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>{{ data.name }}（{{ data.symbol }}）</h2>
+    {% if data.rows %}
+    <span class="hint">共 {{ data.rows|length }} 根 · 截至 {{ data.rows[-1].date }}</span>
+    {% endif %}
+  </div>
+
+  {% if data.candles %}
+  <div class="chart">
+    <svg viewBox="0 0 {{ data.width }} {{ data.height }}" width="{{ data.width }}" height="{{ data.height }}"
+         preserveAspectRatio="xMidYMid meet" role="img">
+      {% for g in data.grid %}
+      <line x1="{{ data.left }}" y1="{{ g.y }}" x2="{{ data.width - data.right }}" y2="{{ g.y }}"
+            stroke="#e3e8f0" stroke-width="1"></line>
+      <text x="{{ data.left - 8 }}" y="{{ g.y + 4 }}" text-anchor="end" font-size="11" fill="#6b7785">{{ g.label }}</text>
+      {% endfor %}
+      {% for c in data.candles %}
+      <line x1="{{ c.x }}" y1="{{ c.wick_top }}" x2="{{ c.x }}" y2="{{ c.wick_bottom }}"
+            stroke="{{ c.color }}" stroke-width="1"></line>
+      <rect x="{{ c.x - c.w / 2 }}" y="{{ c.body_top }}" width="{{ c.w }}" height="{{ c.body_height }}"
+            fill="{{ c.color }}" stroke="{{ c.color }}"></rect>
+      {% endfor %}
+      <text x="{{ data.left }}" y="{{ data.height - 10 }}" font-size="11" fill="#6b7785">{{ data.labels[0] }}</text>
+      <text x="{{ data.width / 2 }}" y="{{ data.height - 10 }}" font-size="11" fill="#6b7785" text-anchor="middle">{{ data.labels[1] }}</text>
+      <text x="{{ data.width - data.right }}" y="{{ data.height - 10 }}" font-size="11" fill="#6b7785" text-anchor="end">{{ data.labels[2] }}</text>
+    </svg>
+  </div>
+  <p class="candle-note">红色为收涨，绿色为收跌；不显示成交量。</p>
+  {% else %}
+  <p class="empty">{{ asof }} 及之前没有该标的的日线，先去 <a href="/quotes">行情同步</a>。</p>
+  {% endif %}
+</section>
+
+{% if data.rows %}
+<section class="panel">
+  <div class="panel-head"><h2>最近 10 根</h2></div>
+  <table>
+    <thead><tr><th>日期</th><th>开盘</th><th>最高</th><th>最低</th><th>收盘</th><th>成交量（手）</th></tr></thead>
+    <tbody>
+    {% for r in data.rows|reverse|list %}
+      {% if loop.index <= 10 %}
+      <tr>
+        <td>{{ r.date }}</td>
+        <td class="num">{{ r.open|money(2) }}</td>
+        <td class="num">{{ r.high|money(2) }}</td>
+        <td class="num">{{ r.low|money(2) }}</td>
+        <td class="num">{{ r.close|money(2) }}</td>
+        <td class="num">{{ r.volume|money(0) }}</td>
+      </tr>
+      {% endif %}
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+{% endblock %}

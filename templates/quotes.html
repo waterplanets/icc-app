@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}行情同步 · ICC 工作台{% endblock %}
+{% block content %}
+<div class="panel-head">
+  <div>
+    <h1>行情同步</h1>
+    <p class="hint">同步范围：自选 ∪ 持仓 ∪ 沪深300。日线按库内最后日期增量拉取，快照每次全量刷新。</p>
+  </div>
+</div>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>操作</h2>
+    <span class="hint">最近快照：{{ last_sync or '尚未同步' }}</span>
+  </div>
+  <div class="inline" style="display:flex;gap:10px;flex-wrap:wrap">
+    <form action="/sync" method="post" class="inline">
+      <button type="submit">同步日线 + 快照</button>
+    </form>
+    <form action="/snapshot" method="post" class="inline">
+      <button type="submit" class="ghost">只刷新快照</button>
+    </form>
+    <form action="/watchlist" method="get" class="inline">
+      <button type="submit" class="ghost">返回自选</button>
+    </form>
+  </div>
+  <p class="hint">定时任务：工作日 15:35 收盘同步；盘中 9:30–11:30、13:00–15:00 每 5 分钟刷新快照。</p>
+</section>
+
+<section class="panel">
+  <div class="panel-head"><h2>快照与涨跌</h2></div>
+  <table>
+    <thead>
+      <tr><th>标的</th><th>分组</th><th>现价</th><th>涨跌</th><th>涨跌幅</th><th>今开</th><th>最高</th><th>最低</th><th>来源</th><th>时间</th></tr>
+    </thead>
+    <tbody>
+    {% for r in rows %}
+      <tr>
+        <td>{{ r.qname or r.iname or r.symbol }}<br><span class="hint">{{ r.symbol }}</span></td>
+        <td><span class="tag">{{ r.group_name }}</span></td>
+        <td class="num">{{ r.price|money }}</td>
+        <td class="num {{ r.change|sign_cls }}">{{ r.change|money }}</td>
+        <td class="num {{ r.pct|sign_cls }}">{{ r.pct|pct }}</td>
+        <td class="num">{{ r.open|money }}</td>
+        <td class="num">{{ r.high|money }}</td>
+        <td class="num">{{ r.low|money }}</td>
+        <td>{{ r.source or '—' }}</td>
+        <td class="num">{{ r.updated_at or '—' }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="10" class="empty">还没有数据，点上方「同步日线 + 快照」。</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="panel">
+  <div class="panel-head"><h2>日线入库情况</h2></div>
+  <table>
+    <thead><tr><th>标的</th><th>名称</th><th>行数</th><th>起始日</th><th>最新日</th></tr></thead>
+    <tbody>
+    {% for s in stats %}
+      <tr>
+        <td>{{ s.symbol }}</td>
+        <td>{{ s.name or '—' }}</td>
+        <td class="num">{{ s.n }}</td>
+        <td class="num">{{ s.first }}</td>
+        <td class="num">{{ s.last }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="5" class="empty">尚无本地日线。</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

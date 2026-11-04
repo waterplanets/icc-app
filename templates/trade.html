@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% block title %}交易 · ICC 工作台{% endblock %}
+{% block content %}
+<div class="panel-head">
+  <div>
+    <h1>虚拟盘下单</h1>
+    <p class="hint">价格留空则取 {{ asof }} 的可用价（{{ '实时快照' if live else '日线收盘' }}）；数量按 100 股整手向下取整，买入会因资金不足自动缩量。成交会记在 {{ asof }}。</p>
+  </div>
+</div>
+
+<div class="cards" style="margin-bottom:18px">
+  <div class="card"><div class="k">可用资金</div><div class="v">{{ pf.cash|money }}</div></div>
+  <div class="card"><div class="k">持仓市值</div><div class="v">{{ pf.market_value|money }}</div></div>
+  <div class="card"><div class="k">净值</div><div class="v">{{ pf.equity|money }}</div></div>
+</div>
+
+<section class="panel">
+  <div class="panel-head"><h2>委托</h2></div>
+  <form action="/trade" method="post">
+    <div class="grid-form">
+      <div>
+        <label>标的</label>
+        <select name="symbol" required>
+          {% for r in rows %}
+          <option value="{{ r.symbol }}">{{ r.symbol }} {{ r.qname or r.iname }}{% if r.price %} · 现价 {{ r.price|money }}{% endif %}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label>方向</label>
+        <select name="side">
+          <option value="buy">买入</option>
+          <option value="sell">卖出</option>
+        </select>
+      </div>
+      <div>
+        <label>数量（股）</label>
+        <input name="qty" placeholder="100" inputmode="numeric">
+      </div>
+      <div>
+        <label>价格（留空=最新价）</label>
+        <input name="price" placeholder="自动" inputmode="decimal">
+      </div>
+      <div>
+        <label>备注</label>
+        <input name="note" placeholder="选填">
+      </div>
+      <div>
+        <label>&nbsp;</label>
+        <button type="submit" style="width:100%">提交委托</button>
+      </div>
+    </div>
+  </form>
+  <p class="hint">卖出数量需不超过持仓数量；卖出会记录本次实现盈亏。</p>
+</section>
+
+<div class="two">
+  <section class="panel">
+    <div class="panel-head"><h2>自选股报价</h2><a href="/quotes">行情同步 →</a></div>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>标的</th><th>现价</th><th>涨跌幅</th></tr></thead>
+        <tbody>
+        {% for r in rows %}
+          <tr>
+            <td>{{ r.qname or r.iname }}<br><span class="hint">{{ r.symbol }}</span></td>
+            <td class="num">{{ (r.price if r.price is not none else r.last_close)|money }}</td>
+            <td class="num {{ r.pct|sign_cls }}">{{ r.pct|pct }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="3" class="empty">自选股为空。</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head"><h2>当前持仓</h2><a href="/positions">全部 →</a></div>
+    <table>
+      <thead><tr><th>标的</th><th>数量</th><th>成本</th><th>现价</th><th>浮盈</th></tr></thead>
+      <tbody>
+      {% for p in pf.positions %}
+        <tr>
+          <td>{{ p.name }}<br><span class="hint">{{ p.symbol }}</span></td>
+          <td class="num">{{ p.qty }}</td>
+          <td class="num">{{ p.avg_cost|money(3) }}</td>
+          <td class="num">{{ p.price|money(3) }}</td>
+          <td class="num {{ p.pnl|sign_cls }}">{{ p.pnl|money }}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="5" class="empty">空仓。</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </section>
+</div>
+
+<section class="panel">
+  <div class="panel-head"><h2>最近成交</h2><a href="/trades">全部 →</a></div>
+  <table>
+    <thead><tr><th>成交日</th><th>标的</th><th>方向</th><th>数量</th><th>价格</th><th>金额</th><th>费用</th><th>盈亏</th><th>备注</th></tr></thead>
+    <tbody>
+    {% for t in trades %}
+      <tr>
+        <td>{{ t.trade_date }}</td>
+        <td>{{ t.name or t.symbol }}<br><span class="hint">{{ t.symbol }}</span></td>
+        <td><span class="tag {{ t.side }}">{{ '买入' if t.side == 'buy' else '卖出' }}</span></td>
+        <td class="num">{{ t.qty }}</td>
+        <td class="num">{{ t.price|money(3) }}</td>
+        <td class="num">{{ t.amount|money }}</td>
+        <td class="num">{{ t.fee|money }}</td>
+        <td class="num {{ t.pnl|sign_cls }}">{{ t.pnl|money }}</td>
+        <td>{{ t.note or '—' }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="9" class="empty">还没有成交。</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}
