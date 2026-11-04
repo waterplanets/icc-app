@@ -22,12 +22,22 @@
 
 ## 快速开始
 
-需要 Python 3.10+。
+需要 Python 3.10+。推荐 [uv](https://docs.astral.sh/uv/)，没有就用 `venv`。
 
 ```bash
-git clone <repo-url> icc-app
+git clone https://github.com/waterplanets/icc-app.git icc-app
 cd icc-app
-python -m pip install -r requirements.txt
+
+uv venv
+uv pip install -r requirements.txt
+
+# 没有 uv 时：
+# python -m venv .venv
+# python -m pip install -r requirements.txt
+
+# 激活虚拟环境
+.\.venv\Scripts\Activate.ps1      # Windows PowerShell
+source .venv/bin/activate         # macOS / Linux
 
 python app.py --sync   # 首次同步行情（会拉约 3 年日线）
 python app.py          # 打开 http://127.0.0.1:8770
@@ -84,9 +94,15 @@ python cli.py --json status
 | 过户费 | 买卖双向 0.001% |
 | 滑点 | 5 bp |
 | 最小交易单位 | 100 股 |
+| 涨跌停 | 涨停不可买、跌停不可卖（主板 10%、创业板/科创板 20%、ST 5%、北交所 30%） |
+| 单笔成交量上限 | 当日成交量的 2%，超出按整手部分成交 |
 
 买入价 = 行情价 ×(1+滑点)，卖出价 = 行情价 ×(1−滑点)，费用从现金扣除；
 卖出记录本次实现盈亏。回放模式下成交价取 asof 当日收盘价（无盘中价）。
+
+涨跌停按昨收计算，参考价触板就直接拒单。成交量上限用「当日成交量 × 2%」作为
+流动性约束：单笔委托超过这个量只会成交到上限，并提示「部分成交」。
+这是流动性近似，**不是换手率**——换手率需要流通股本，本项目没有该数据。
 
 ## 数据与隐私
 

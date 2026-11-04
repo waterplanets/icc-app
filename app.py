@@ -438,6 +438,8 @@ def trade_action(symbol: str = Form(...), side: str = Form(...), qty: str = Form
                f" @ {res['price']}（成交日 {res['trade_date']}），费用 {res['fee']} 元")
         if res.get("pnl") is not None:
             msg += f"，本次盈亏 {res['pnl']} 元"
+        if res.get("limited"):
+            msg += "（受当日成交量限制，仅部分成交）"
         return RedirectResponse(f"/positions?msg={msg}", status_code=303)
     return RedirectResponse(f"/trade?msg=委托被拒：{res['reason']}", status_code=303)
 

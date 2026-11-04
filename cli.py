@@ -193,7 +193,8 @@ def main(argv: Optional[list] = None) -> int:
             elif res["status"] == "filled":
                 print(f"{'买入' if res['side'] == 'buy' else '卖出'} {sym} {res['qty']} 股 "
                       f"@ {res['price']}（成交日 {res['trade_date']}），费用 {res['fee']} 元"
-                      + (f"，本次盈亏 {res['pnl']}" if res.get("pnl") is not None else ""))
+                      + (f"，本次盈亏 {res['pnl']}" if res.get("pnl") is not None else "")
+                      + ("（受当日成交量限制，仅部分成交）" if res.get("limited") else ""))
                 print(f"剩余现金 {fmt_money(db.account(conn, acc['id'])['cash'])}")
             else:
                 print(f"委托被拒：{res['reason']}", file=sys.stderr)

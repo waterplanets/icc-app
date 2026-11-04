@@ -61,9 +61,11 @@
         <tr><td>过户费</td><td class="num">{{ (fee.transfer_fee * 100)|round(3) }}%</td></tr>
         <tr><td>滑点</td><td class="num">{{ fee.slippage_bps }} bp</td></tr>
         <tr><td>最小交易单位</td><td class="num">{{ fee.lot_size }} 股</td></tr>
+        <tr><td>涨跌停</td><td class="num">涨停买不进、跌停卖不掉（主板 10%，创业板/科创板 20%，ST 5%）</td></tr>
+        <tr><td>单笔成交量</td><td class="num">最多占当日成交量的 {{ (fee.max_participation * 100)|round(0) }}%，超出按整手缩量</td></tr>
       </tbody>
     </table>
-    <p class="hint">买入价 = 行情价 ×(1+滑点)，卖出价 = 行情价 ×(1−滑点)，费用从现金中扣除。</td>
+    <p class="hint">买入价 = 行情价 ×(1+滑点)，卖出价 = 行情价 ×(1−滑点)，费用从现金中扣除。成交量约束是流动性近似，不等于换手率。</p>
   </section>
 
   <section class="panel">
