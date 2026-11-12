@@ -119,6 +119,46 @@ CREATE TABLE IF NOT EXISTS equity(
     note         TEXT,
     PRIMARY KEY (account_id, date)
 );
+CREATE TABLE IF NOT EXISTS news(
+    id         TEXT PRIMARY KEY,
+    date       TEXT NOT NULL,
+    time       TEXT,
+    symbol     TEXT,
+    title      TEXT NOT NULL,
+    content    TEXT,
+    media      TEXT,
+    url        TEXT,
+    label      INTEGER,          -- -1 负面 / 0 中性 / 1 正面（SVM 学生模型）
+    score      REAL,             -- 期望情感分 -1..1
+    confidence REAL,
+    fetched_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_news_date ON news(date);
+CREATE INDEX IF NOT EXISTS idx_news_symbol ON news(symbol);
+CREATE TABLE IF NOT EXISTS sentiment_daily(
+    date      TEXT NOT NULL,
+    symbol    TEXT NOT NULL,
+    n         INTEGER NOT NULL,
+    pos       INTEGER NOT NULL,
+    neu       INTEGER NOT NULL,
+    neg       INTEGER NOT NULL,
+    avg_score REAL NOT NULL,
+    avg_conf  REAL NOT NULL,
+    PRIMARY KEY (date, symbol)
+);
+CREATE TABLE IF NOT EXISTS council_runs(
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    asof       TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    payload    TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS debate_runs(
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol     TEXT NOT NULL,
+    asof       TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    payload    TEXT NOT NULL
+);
 """
 
 OLD_TABLES = ("positions", "trades", "equity", "account")

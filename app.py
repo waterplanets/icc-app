@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sqlite3
 import sys
 from typing import Any, Dict, Iterator, List, Optional
@@ -19,15 +20,19 @@ from typing import Any, Dict, Iterator, List, Optional
 import uvicorn
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
-from fastapi import Depends, FastAPI, Form, Request
+from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 import broker
+import council
 import db
+import debate
 import feed
+import newsfeed
 import sync
+import agent_tools
 
 BASE_DIR = db.BASE_DIR
 app = FastAPI(title="ICC 本地工作台", docs_url=None, redoc_url=None)
@@ -471,6 +476,173 @@ def kline_page(request: Request, symbol: str = "600519.SH", n: int = 60,
     return render(request, "kline.html", ctx, data=data, page="kline")
 
 
+# --------------------------------------------------------------------------- #
+# 新闻情绪（ml/ 训练的 SVM 模型推理）
+# --------------------------------------------------------------------------- #
+@app.get("/news", response_class=HTMLResponse)
+def news_page(request: Request, symbol: str = "", msg: str = "",
+              conn: sqlite3.Connection = Depends(get_conn),
+              ctx: Dict[str, Any] = Depends(get_ctx)) -> HTMLResponse:
+    sym = symbol.strip() or None
+    rows = newsfeed.news_list(conn, ctx["asof"], symbol=sym, limit=120)
+    sig = newsfeed.signals(conn, ctx["asof"])
+    daily = newsfeed.daily_rows(conn, ctx["asof"], symbol=sym, days=12)
+    return render(request, "news.html", ctx, rows=rows, signals=sig, daily=daily,
+                  symbol=sym, stats=newsfeed.stats(conn), msg=msg, page="news")
+
+
+@app.post("/news/sync")
+def news_sync(per_symbol: str = Form("8"),
+              conn: sqlite3.Connection = Depends(get_conn),
+              ctx: Dict[str, Any] = Depends(get_ctx)) -> RedirectResponse:
+    try:
+        n = max(min(int(per_symbol), 20), 1)
+    except ValueError:
+        n = 8
+    targets = [(r["symbol"], r["name"]) for r in conn.execute(
+        "SELECT symbol, name FROM instruments WHERE is_watch=1").fetchall()]
+    try:
+        res = newsfeed.sync(conn, targets, per_symbol=n)
+    except Exception as e:
+        return RedirectResponse(f"/news?msg=抓取失败：{type(e).__name__}: {e}", status_code=303)
+    tail = "" if res["model"] else "（未找到 ml/model/model.joblib，仅抓取未打分）"
+    msg = (f"抓取 {res['symbols']} 个检索词，去重后 {res['kept']} 条，"
+           f"已打分 {res['scored']} 条{tail}")
+    if res["errors"]:
+        msg += f"；失败 {len(res['errors'])} 项：{res['errors'][0]}"
+    return RedirectResponse(f"/news?msg={msg}", status_code=303)
+
+
+@app.get("/api/news")
+def api_news(symbol: str = "", limit: int = 50,
+             conn: sqlite3.Connection = Depends(get_conn),
+             ctx: Dict[str, Any] = Depends(get_ctx)) -> Dict[str, Any]:
+    rows = newsfeed.news_list(conn, ctx["asof"], symbol=symbol.strip() or None,
+                              limit=max(min(limit, 300), 1))
+    return {"asof": ctx["asof"], "count": len(rows), "items": rows}
+
+
+@app.get("/api/sentiment")
+def api_sentiment(symbol: str = "", days: int = 15,
+                  conn: sqlite3.Connection = Depends(get_conn),
+                  ctx: Dict[str, Any] = Depends(get_ctx)) -> Dict[str, Any]:
+    rows = newsfeed.daily_rows(conn, ctx["asof"], symbol=symbol.strip() or None,
+                               days=max(min(days, 60), 1))
+    return {"asof": ctx["asof"], "count": len(rows), "items": rows}
+
+
+@app.get("/api/signal")
+def api_signal(conn: sqlite3.Connection = Depends(get_conn),
+               ctx: Dict[str, Any] = Depends(get_ctx)) -> Dict[str, Any]:
+    sig = newsfeed.signals(conn, ctx["asof"])
+    return {"asof": ctx["asof"], "count": len(sig),
+            "review_threshold": newsfeed.CONF_REVIEW, "items": sig}
+
+
+# --------------------------------------------------------------------------- #
+# 投委会：8 位大师人格 + 多轮审议（复用 invest-councilskill 引擎）
+# --------------------------------------------------------------------------- #
+@app.get("/council", response_class=HTMLResponse)
+def council_page(request: Request, msg: str = "", run: int = 0,
+                 conn: sqlite3.Connection = Depends(get_conn),
+                 ctx: Dict[str, Any] = Depends(get_ctx)) -> HTMLResponse:
+    data: Dict[str, Any] = {"ok": False, "items": [], "asof": ctx["asof"]}
+    if run:
+        row = conn.execute("SELECT payload FROM council_runs WHERE id=?", (run,)).fetchone()
+        if row:
+            data = json.loads(row[0])
+    else:
+        last = conn.execute("SELECT payload FROM council_runs ORDER BY id DESC LIMIT 1").fetchone()
+        if last:
+            data = json.loads(last[0])
+    return render(request, "council.html", ctx, data=data, msg=msg,
+                  history=council.history(conn), page="council")
+
+
+@app.post("/council/run")
+def council_run(conn: sqlite3.Connection = Depends(get_conn),
+                ctx: Dict[str, Any] = Depends(get_ctx)) -> RedirectResponse:
+    try:
+        res = council.run(conn, ctx["asof"])
+    except Exception as e:
+        return RedirectResponse(f"/council?msg=审议失败：{type(e).__name__}: {e}", status_code=303)
+    if not res.get("ok"):
+        return RedirectResponse(f"/council?msg={res.get('error', '未能生成决议')}", status_code=303)
+    return RedirectResponse(
+        f"/council?msg=已审议 {len(res['items'])} 个标的（虚拟日期 {ctx['asof']}）", status_code=303)
+
+
+@app.get("/api/council")
+def api_council(conn: sqlite3.Connection = Depends(get_conn),
+                ctx: Dict[str, Any] = Depends(get_ctx)) -> Dict[str, Any]:
+    res = council.run(conn, ctx["asof"], record=False)
+    return res
+
+
+# --------------------------------------------------------------------------- #
+# LLM 辩论：多头 / 空头 / 主席，提示词在 config/debate_prompt.yaml
+# --------------------------------------------------------------------------- #
+@app.get("/debate", response_class=HTMLResponse)
+def debate_page(request: Request, symbol: str = "", msg: str = "",
+                conn: sqlite3.Connection = Depends(get_conn),
+                ctx: Dict[str, Any] = Depends(get_ctx)) -> HTMLResponse:
+    sym = symbol.strip()
+    data = debate.latest(conn, sym or None)
+    symbols = [dict(r) for r in conn.execute(
+        "SELECT symbol, name FROM instruments WHERE is_watch=1 ORDER BY group_name, symbol").fetchall()]
+    return render(request, "debate.html", ctx, data=data, symbols=symbols,
+                  symbol=sym, msg=msg, history=debate.history(conn, sym or None),
+                  page="debate")
+
+
+@app.post("/debate/run")
+def debate_run(symbol: str = Form(...),
+               conn: sqlite3.Connection = Depends(get_conn),
+               ctx: Dict[str, Any] = Depends(get_ctx)) -> RedirectResponse:
+    sym = symbol.strip()
+    try:
+        c = council.run(conn, ctx["asof"], symbols=[sym], record=False)
+        res = debate.run(conn, sym, ctx["asof"], council_payload=c)
+    except Exception as e:
+        return RedirectResponse(f"/debate?symbol={sym}&msg=辩论失败：{type(e).__name__}: {e}",
+                                status_code=303)
+    return RedirectResponse(
+        f"/debate?symbol={sym}&msg=已生成决议：{res['verdict']}（仓位上限 {res['position_pct']}%）",
+        status_code=303)
+
+
+@app.get("/api/debate")
+def api_debate(symbol: str = "",
+               conn: sqlite3.Connection = Depends(get_conn),
+               ctx: Dict[str, Any] = Depends(get_ctx)) -> Dict[str, Any]:
+    sym = symbol.strip()
+    if not sym:
+        raise HTTPException(status_code=400, detail="需要 symbol 参数")
+    try:
+        c = council.run(conn, ctx["asof"], symbols=[sym], record=False)
+        return debate.run(conn, sym, ctx["asof"], council_payload=c)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"{type(e).__name__}: {e}")
+
+
+# --------------------------------------------------------------------------- #
+# Agent 插件：安装自检与用法引导
+# --------------------------------------------------------------------------- #
+@app.get("/agent", response_class=HTMLResponse)
+def agent_page(request: Request, msg: str = "",
+               ctx: Dict[str, Any] = Depends(get_ctx)) -> HTMLResponse:
+    return render(request, "agent.html", ctx, st=agent_tools.status(),
+                  prompts=agent_tools.prompts(ctx["asof"]), test=None, msg=msg, page="agent")
+
+
+@app.get("/agent/selftest", response_class=HTMLResponse)
+def agent_selftest(request: Request,
+                   ctx: Dict[str, Any] = Depends(get_ctx)) -> HTMLResponse:
+    return render(request, "agent.html", ctx, st=agent_tools.status(),
+                  prompts=agent_tools.prompts(ctx["asof"]), test=agent_tools.selftest(),
+                  msg="", page="agent")
+
+
 @app.get("/healthz")
 def healthz() -> Dict[str, str]:
     return {"status": "ok"}
@@ -495,6 +667,18 @@ def job_snapshot() -> None:
         conn.close()
 
 
+def job_news_sync() -> None:
+    conn = db.connect()
+    try:
+        targets = [(r["symbol"], r["name"]) for r in conn.execute(
+            "SELECT symbol, name FROM instruments WHERE is_watch=1").fetchall()]
+        newsfeed.sync(conn, targets, per_symbol=8)
+    except Exception:
+        pass  # 新闻抓取失败不影响行情与虚拟盘
+    finally:
+        conn.close()
+
+
 def start_scheduler() -> BackgroundScheduler:
     sched = BackgroundScheduler(timezone="Asia/Shanghai")
     sched.add_job(job_daily_sync, CronTrigger(day_of_week="mon-fri", hour=15, minute=35),
@@ -504,6 +688,8 @@ def start_scheduler() -> BackgroundScheduler:
                   id="snap", replace_existing=True)
     sched.add_job(job_snapshot, CronTrigger(day_of_week="mon-fri", hour=15, minute=0),
                   id="snap_close", replace_existing=True)
+    sched.add_job(job_news_sync, CronTrigger(day_of_week="mon-fri", hour=16, minute=5),
+                  id="news", replace_existing=True)
     sched.start()
     return sched
 

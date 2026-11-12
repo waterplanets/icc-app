@@ -88,13 +88,20 @@ def fees_of(amount: float, side: str) -> float:
 
 def trade_price(conn: sqlite3.Connection, account: Dict[str, Any],
                 symbol: str) -> Optional[float]:
-    """当前时间里该标的可用的成交参考价：实时模式用快照，回放模式用 asof 收盘。"""
+    """当前时间里该标的可用的成交参考价：实时模式用快照，回放模式用 asof 收盘。
+
+    快照与最近收盘价偏离超过 50% 视为口径异常（例如上游价格被放大 100 倍），
+    退回日线收盘，避免把错误价格写进成交与净值。
+    """
+    info = db.close_on(conn, symbol, account["asof"])
+    last_close = info["close"] if info else None
     if account["live"]:
         q = db.get_quote(conn, symbol)
         if q and q["price"]:
-            return float(q["price"])
-    info = db.close_on(conn, symbol, account["asof"])
-    return info["close"] if info else None
+            px = float(q["price"])
+            if last_close is None or 0.5 <= px / last_close <= 1.5:
+                return px
+    return last_close
 
 
 def buy(conn: sqlite3.Connection, account_id: int, symbol: str, name: str, qty: int,
@@ -155,7 +162,15 @@ def sell(conn: sqlite3.Connection, account_id: int, symbol: str, qty: Optional[i
     pos = db.get_position(conn, account_id, symbol)
     if not pos:
         return {"status": "rejected", "reason": "无持仓"}
-    qty = pos["qty"] if qty is None else min(int(qty), pos["qty"])
+    # A 股 T+1：当日买入的股份当日不可卖出（成交日按时间指针记）
+    bought_today = conn.execute(
+        "SELECT COALESCE(SUM(qty),0) FROM trades WHERE account_id=? AND symbol=? "
+        "AND side='buy' AND trade_date=?",
+        (account_id, symbol, acc["asof"])).fetchone()[0]
+    available = pos["qty"] - int(bought_today or 0)
+    if available <= 0:
+        return {"status": "rejected", "reason": f"T+1：{acc['asof']} 买入的股份当日不可卖出"}
+    qty = available if qty is None else min(int(qty), available)
     if qty <= 0:
         return {"status": "rejected", "reason": "卖出数量为 0"}
     limited = False

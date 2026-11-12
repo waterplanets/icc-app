@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}LLM 辩论 · ICC 工作台{% endblock %}
+{% block content %}
+<div class="panel-head">
+  <div>
+    <h1>LLM 辩论</h1>
+    <p class="hint">
+      照 TradingAgents 的分工走一遍：新闻/技术分析 → 多空研究员辩论 → 研究主管出计划 →
+      交易员给方案 → 激进/中立/保守风控 → 组合经理终裁。角色提示词在
+      <code>config/debate_prompt.yaml</code>，可改。
+    </p>
+  </div>
+  <form action="/debate/run" method="post" class="inline">
+    <select name="symbol" style="min-width:180px">
+      {% for s in symbols %}
+        <option value="{{ s.symbol }}" {{ 'selected' if s.symbol == symbol else '' }}>
+          {{ s.name }}（{{ s.symbol }}）
+        </option>
+      {% endfor %}
+    </select>
+    <button type="submit">开始辩论</button>
+  </form>
+</div>
+
+{% if msg %}<p class="hint" style="margin:0 0 14px">{{ msg }}</p>{% endif %}
+
+{% if not data %}
+<div class="panel">
+  <p class="empty">还没有辩论记录。选一个标的，点「开始辩论」。</p>
+  <p class="hint">一次辩论会调用 10 次 DeepSeek（2 分析 + 2 多空 + 计划 + 交易员 + 3 风控 + 终裁），约 30–60 秒。</p>
+</div>
+{% else %}
+<div class="cards" style="margin-bottom:18px">
+  <div class="card">
+    <div class="k">标的</div>
+    <div class="v" style="font-size:16px">{{ data.name }}</div>
+    <div class="d">{{ data.symbol }} · {{ data.asof }}</div>
+  </div>
+  <div class="card">
+    <div class="k">评级</div>
+    <div class="v">{{ data.rating or '—' }}</div>
+    <div class="d">{{ data.decision or '' }} · 信心 {{ '%.2f'|format(data.confidence) }}</div>
+  </div>
+  <div class="card">
+    <div class="k">建议仓位</div>
+    <div class="v">{{ '%.1f'|format(data.position_pct) }}%</div>
+    <div class="d">交易员与组合经理取低值并按信心折减</div>
+  </div>
+  <div class="card">
+    <div class="k">模型 / 阶段</div>
+    <div class="v" style="font-size:16px">{{ data.model }}</div>
+    <div class="d">{{ data.stages|length }} 次调用 · {{ data.generated_at }}</div>
+  </div>
+</div>
+
+<section class="panel">
+  <div class="panel-head"><h2>组合经理决议</h2></div>
+  <p>{{ data.judge.executive_summary }}</p>
+  <table>
+    <tbody>
+      <tr><td style="width:150px">保留的反方意见</td><td>{{ data.judge.keep_dissent or '—' }}</td></tr>
+      <tr><td>依赖的关键假设</td><td>{% for a in data.judge.assumptions or [] %}· {{ a }}<br>{% else %}—{% endfor %}</td></tr>
+      <tr><td>投资论点</td><td>{{ data.judge.investment_thesis or '—' }}</td></tr>
+      <tr><td>交易员方案</td><td>{{ data.trade.rating or '—' }}，仓位 {{ data.trade.position_pct or 0 }}%；
+        触发：{{ data.trade.trigger or '—' }}；失效：{{ data.trade.invalid_if or '—' }}</td></tr>
+      <tr><td>研究主管</td><td>{{ data.plan.rating or '—' }}（信心 {{ data.plan.confidence or 0 }}）：
+        {{ data.plan.rationale or '' }}</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section class="panel">
+  <div class="panel-head"><h2>风控三方</h2></div>
+  <table>
+    <thead><tr><th>类型</th><th>立场</th><th>意见</th></tr></thead>
+    <tbody>
+    {% for label, r in data.risk.items() %}
+      <tr>
+        <td>{{ label }}</td>
+        <td>{{ r.stance or '—' }}</td>
+        <td class="hint">{% for p in r.points or [] %}· {{ p }}<br>{% else %}—{% endfor %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="panel">
+  <div class="panel-head"><h2>全程记录</h2></div>
+  {% for s in data.stages %}
+    <p class="hint" style="margin:12px 0 2px"><strong>{{ s.step }}</strong> · {{ s.role }}
+      {% if s.round > 1 %}· 第 {{ s.round }} 轮{% endif %}</p>
+    <pre style="white-space:pre-wrap;font-size:12px;line-height:1.6;margin:0">{{ s.content }}</pre>
+  {% endfor %}
+</section>
+
+<section class="panel">
+  <div class="panel-head"><h2>送进模型的证据</h2></div>
+  <pre class="hint" style="white-space:pre-wrap;font-size:12px;line-height:1.6">{{ data.evidence }}</pre>
+  <p class="hint">因子来自本地日线，新闻标签来自 ml/ 的 SVM，规则结论来自 8 位人格的 YAML 权重。</p>
+</section>
+
+<section class="panel">
+  <div class="panel-head"><h2>历史</h2></div>
+  <table>
+    <thead><tr><th>#</th><th>标的</th><th>虚拟日期</th><th>时间</th></tr></thead>
+    <tbody>
+    {% for h in history %}
+      <tr><td>{{ h.id }}</td><td>{{ h.symbol }}</td><td>{{ h.asof }}</td><td class="hint">{{ h.created_at }}</td></tr>
+    {% else %}
+      <tr><td colspan="4" class="empty">暂无记录。</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <p class="hint">JSON 接口：<code>/api/debate?symbol=600519.SH</code>。</p>
+</section>
+{% endif %}
+{% endblock %}

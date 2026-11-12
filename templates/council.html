@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% block title %}投委会 · ICC 工作台{% endblock %}
+{% block content %}
+<div class="panel-head">
+  <div>
+    <h1>投委会</h1>
+    <p class="hint">
+      8 位大师人格各自按自己的规则给分 → 一轮审议让偏离共识的观点向共识修正 → 按「人格权重 × 信心」聚合。
+      引擎来自本地 skill <code>invest-councilskill</code>（personas / council 模块），本页只提供证据。
+    </p>
+  </div>
+  <form action="/council/run" method="post" class="inline">
+    <button type="submit">重新审议（虚拟日期 {{ asof }}）</button>
+  </form>
+</div>
+
+{% if not data.ok %}
+<div class="panel">
+  <p class="empty">{{ data.error or '还没有审议记录。点右上角「重新审议」。' }}</p>
+  <p class="hint">
+    需要的证据：至少 30 根日线（动量 / 波动 / RSI / 趋势 / 回撤 / 量比），以及 ml/ 模型给出的新闻情绪。
+    缺任一项，对应因子的覆盖度会下降，个人分数向 0 收缩。
+  </p>
+</div>
+{% else %}
+
+<div class="cards" style="margin-bottom:18px">
+  <div class="card">
+    <div class="k">审议日期</div>
+    <div class="v" style="font-size:16px">{{ data.asof }}</div>
+    <div class="d">{{ data.generated_at }}</div>
+  </div>
+  <div class="card">
+    <div class="k">参与标的</div>
+    <div class="v">{{ data['items']|length }}</div>
+    <div class="d">自选池中因子齐全的</div>
+  </div>
+  <div class="card">
+    <div class="k">审议轮次</div>
+    <div class="v">{{ data.rounds }}</div>
+    <div class="d">收敛系数 {{ data.convergence }}</div>
+  </div>
+  <div class="card">
+    <div class="k">分歧警示</div>
+    <div class="v">{{ data['items']|selectattr('dissent')|list|length }}</div>
+    <div class="d">多空分歧超过阈值</div>
+  </div>
+</div>
+
+<section class="panel">
+  <div class="panel-head"><h2>决议</h2></div>
+  <table>
+    <thead>
+      <tr><th>标的</th><th>分数</th><th>姿态</th><th>分歧</th><th>多头</th><th>空头</th><th>建议仓位上限</th></tr>
+    </thead>
+    <tbody>
+    {% for it in data['items'] %}
+      <tr>
+        <td>{{ it.name }}<br><span class="hint">{{ it.symbol }} · {{ it.sector }}</span></td>
+        <td class="num {{ it.score|sign_cls }}">{{ '%+.1f'|format(it.score) }}</td>
+        <td>
+          <strong>{{ it.stance }}</strong>
+          {% if it.dissent %}<br><span class="down">分歧警示</span>{% endif %}
+          <br><span class="hint">信心 {{ '%.2f'|format(it.confidence) }}</span>
+        </td>
+        <td class="num">{{ '%.2f'|format(it.dispersion) }}</td>
+        <td class="hint">{% for b in it.bulls %}{{ b.name }} {{ b.score }}<br>{% else %}—{% endfor %}</td>
+        <td class="hint">{% for b in it.bears %}{{ b.name }} {{ b.score }}<br>{% else %}—{% endfor %}</td>
+        <td class="num">{{ '%.1f'|format(it.suggest_weight * 100) }}%</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <p class="hint">
+    建议仓位 = 姿态对应上限 ×（1 − 分歧度/2）。分数是规则输出，不是收益预测；仓位上限也不考虑组合层面的行业集中。
+  </p>
+</section>
+
+<div class="two">
+  <section class="panel">
+    <div class="panel-head"><h2>审议前：各人打分</h2></div>
+    {% for it in data['items'][:6] %}
+      <p class="hint" style="margin:10px 0 4px"><strong>{{ it.name }}</strong>（{{ it.symbol }}）</p>
+      <table>
+        <thead><tr><th>人格</th><th>第一轮</th><th>第二轮</th></tr></thead>
+        <tbody>
+        {% for r in it.round1 %}
+          <tr>
+            <td>{{ r.name }}</td>
+            <td class="num {{ r.score|sign_cls }}">{{ '%+.1f'|format(r.score) }}</td>
+            <td class="num {{ it.round2[loop.index0].score|sign_cls }}">{{ '%+.1f'|format(it.round2[loop.index0].score) }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    {% endfor %}
+  </section>
+
+  <section class="panel">
+    <div class="panel-head"><h2>证据</h2></div>
+    <table>
+      <thead><tr><th>标的</th><th>20日动量</th><th>波动率</th><th>RSI</th><th>趋势</th><th>新闻情绪</th></tr></thead>
+      <tbody>
+      {% for it in data['items'][:12] %}
+        <tr>
+          <td>{{ it.name }}</td>
+          <td class="num {{ it.features.mom_20|sign_cls }}">{{ '%+.1f%%'|format(it.features.mom_20 * 100) if it.features.mom_20 is defined else '—' }}</td>
+          <td class="num">{{ '%.1f%%'|format(it.features.vol_20 * 100) if it.features.vol_20 is defined else '—' }}</td>
+          <td class="num">{{ '%.0f'|format(it.features.rsi14) if it.features.rsi14 is defined else '—' }}</td>
+          <td class="num {{ it.features.trend|sign_cls }}">{{ '%+.1f%%'|format(it.features.trend * 100) if it.features.trend is defined else '—' }}</td>
+          <td class="num {{ it.features.news_sent|sign_cls }}">{{ '%+.2f'|format(it.features.news_sent) if it.features.news_sent is defined else '—' }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <p class="hint">新闻情绪来自 ml/ 的 SVM 学生模型，按三日条数加权。缺新闻的标的该因子为空，人格评估会按覆盖度折减。</p>
+  </section>
+</div>
+
+<section class="panel">
+  <div class="panel-head"><h2>历史审议</h2></div>
+  <table>
+    <thead><tr><th>#</th><th>虚拟日期</th><th>生成时间</th></tr></thead>
+    <tbody>
+    {% for h in history %}
+      <tr><td><a href="/council?run={{ h.id }}">{{ h.id }}</a></td><td>{{ h.asof }}</td><td class="hint">{{ h.created_at }}</td></tr>
+    {% else %}
+      <tr><td colspan="3" class="empty">暂无记录。</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <p class="hint">JSON 接口：<code>/api/council</code>（不写历史记录）。</p>
+</section>
+{% endif %}
+{% endblock %}

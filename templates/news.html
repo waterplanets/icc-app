@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% block title %}新闻情绪 · ICC 工作台{% endblock %}
+{% block content %}
+<div class="panel-head">
+  <div>
+    <h1>新闻情绪</h1>
+    <p class="hint">
+      新闻由东财资讯搜索抓取，情感标签来自 <code>ml/</code> 训练的 TF-IDF + 线性 SVM 学生模型
+      （LLM 教师标注 1200 条，5 折 macro-F1 0.73）。展示范围限制在虚拟现在 {{ asof }} 及之前。
+    </p>
+  </div>
+  <form action="/news/sync" method="post" class="inline">
+    <input name="per_symbol" value="8" style="width:60px" title="每个检索词抓几条">
+    <button type="submit">抓取并打分</button>
+  </form>
+</div>
+
+<div class="cards" style="margin-bottom:18px">
+  <div class="card">
+    <div class="k">库内新闻</div>
+    <div class="v">{{ stats.n }}</div>
+    <div class="d">{{ stats.first or '—' }} ~ {{ stats.last or '—' }}</div>
+  </div>
+  <div class="card">
+    <div class="k">未打分</div>
+    <div class="v">{{ stats.unscored }}</div>
+    <div class="d">模型缺失或无正文时留空</div>
+  </div>
+  <div class="card">
+    <div class="k">最近抓取</div>
+    <div class="v" style="font-size:16px">{{ stats.fetched_at or '—' }}</div>
+    <div class="d">手工触发，不随行情定时同步</div>
+  </div>
+  <div class="card">
+    <div class="k">复核阈值</div>
+    <div class="v">0.60</div>
+    <div class="d">低于此置信度标记「需人工复核」</div>
+  </div>
+</div>
+
+<section class="panel">
+  <div class="panel-head">
+    <h2>情绪信号（按标的聚合最近 3 个交易日）</h2>
+  </div>
+  <table>
+    <thead>
+      <tr><th>标的</th><th>最近日期</th><th>条数</th><th>情绪分</th><th>平均置信</th><th>倾向</th><th>说明</th></tr>
+    </thead>
+    <tbody>
+    {% for s in signals %}
+      <tr>
+        <td>{{ s.name }}<br><span class="hint">{{ s.symbol }}</span></td>
+        <td>{{ s.date }}</td>
+        <td class="num">{{ s.n }}</td>
+        <td class="num {{ s.score|sign_cls }}">{{ '%+.2f'|format(s.score) }}</td>
+        <td class="num">{{ '%.2f'|format(s.conf) }}</td>
+        <td><strong>{{ s.action }}</strong></td>
+        <td class="hint">{{ s.why }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="7" class="empty">还没有情绪数据，点右上角「抓取并打分」。</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <p class="hint">情绪分是 SVM 分类概率的期望值（-1 到 +1），按条数加权平均。信号只作参考，不构成买卖建议。</p>
+</section>
+
+<div class="two">
+  <section class="panel">
+    <div class="panel-head"><h2>最近新闻</h2></div>
+    <table>
+      <thead><tr><th>日期</th><th>标题</th><th>来源</th><th>标签</th><th>分</th></tr></thead>
+      <tbody>
+      {% for r in rows %}
+        <tr>
+          <td>{{ r.date }}</td>
+          <td>
+            {% if r.url %}<a href="{{ r.url }}" target="_blank" rel="noopener">{{ r.title }}</a>
+            {% else %}{{ r.title }}{% endif %}
+            <br><span class="hint">{{ r.symbol or '宏观' }}</span>
+          </td>
+          <td class="hint">{{ r.media }}</td>
+          <td>
+            {% if r.label == 1 %}<span class="up">正面</span>
+            {% elif r.label == -1 %}<span class="down">负面</span>
+            {% elif r.label == 0 %}<span class="flat">中性</span>
+            {% else %}<span class="hint">—</span>{% endif %}
+          </td>
+          <td class="num">{{ '%+.2f'|format(r.score) if r.score is not none else '—' }}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="5" class="empty">暂无新闻。</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head"><h2>每日情绪</h2></div>
+    <table>
+      <thead><tr><th>日期</th><th>标的</th><th>条数</th><th>正/中/负</th><th>均值</th></tr></thead>
+      <tbody>
+      {% for d in daily %}
+        <tr>
+          <td>{{ d.date }}</td>
+          <td class="hint">{{ d.symbol or '宏观' }}</td>
+          <td class="num">{{ d.n }}</td>
+          <td class="num">{{ d.pos }}/{{ d.neu }}/{{ d.neg }}</td>
+          <td class="num {{ d.avg_score|sign_cls }}">{{ '%+.2f'|format(d.avg_score) }}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="5" class="empty">暂无聚合结果。</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <p class="hint">JSON 接口：<code>/api/news</code>、<code>/api/sentiment</code>、<code>/api/signal</code>。</p>
+  </section>
+</div>
+{% endblock %}

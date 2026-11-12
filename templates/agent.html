@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% block title %}Agent 插件 · ICC 工作台{% endblock %}
+{% block content %}
+<div class="panel-head">
+  <div>
+    <h1>Agent 插件</h1>
+    <p class="hint">
+      把本地打分与辩论包成 DSH 工具，装在本机 <code>desktop</code> profile 里。
+      这个页面的作用是：确认装好了、告诉你该怎么跟 agent 说、以及验证 Python 通道没断。
+    </p>
+  </div>
+  <form action="/agent/selftest" method="get" class="inline">
+    <button type="submit">运行自检</button>
+  </form>
+</div>
+
+{% if msg %}<p class="hint" style="margin:0 0 14px">{{ msg }}</p>{% endif %}
+
+<div class="cards" style="margin-bottom:18px">
+  <div class="card">
+    <div class="k">安装状态</div>
+    <div class="v {{ 'up' if st.ready else 'down' }}">{{ '就绪' if st.ready else '待处理' }}</div>
+    <div class="d">{{ st.checks|selectattr('ok')|list|length }}/{{ st.checks|length }} 项通过</div>
+  </div>
+  <div class="card">
+    <div class="k">工具数</div>
+    <div class="v">2</div>
+    <div class="d">news_sentiment · stock_debate</div>
+  </div>
+  <div class="card">
+    <div class="k">虚拟日期</div>
+    <div class="v" style="font-size:16px">{{ asof }}</div>
+    <div class="d">示例提示词按这个日期生成</div>
+  </div>
+</div>
+
+<section class="panel">
+  <div class="panel-head"><h2>安装检查</h2></div>
+  <table>
+    <thead><tr><th>项目</th><th>结果</th><th>说明</th></tr></thead>
+    <tbody>
+    {% for c in st.checks %}
+      <tr>
+        <td>{{ c.name }}</td>
+        <td class="{{ 'up' if c.ok else 'down' }}">{{ '通过' if c.ok else '未通过' }}</td>
+        <td class="hint">{{ c.detail }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <p class="hint">
+    profile 路径：<code>{{ st.profile }}</code>。改过 package.json 或装过插件后，要重启 DSH 桌面端才会加载。
+  </p>
+</section>
+
+{% if test %}
+<section class="panel">
+  <div class="panel-head"><h2>自检结果</h2></div>
+  {% if test.ok %}
+    <p class="up">通过，耗时 {{ test.ms }} ms。下面是插件 spawn 同一条命令拿到的输出：</p>
+    <table>
+      <thead><tr><th>新闻</th><th>标签</th><th>期望分</th><th>置信度</th></tr></thead>
+      <tbody>
+      {% for it in test['items'] %}
+        <tr>
+          <td class="hint">{{ it.title }}</td>
+          <td>{{ it.label_name }}</td>
+          <td class="num {{ it.score|sign_cls }}">{{ '%+.2f'|format(it.score) }}</td>
+          <td class="num">{{ '%.2f'|format(it.confidence) }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="down">失败：{{ test.error }}</p>
+    <p class="hint">常见原因：解释器路径变了、ml/model 下的模型文件被移动、依赖缺失。</p>
+  {% endif %}
+</section>
+{% endif %}
+
+<section class="panel">
+  <div class="panel-head"><h2>两个工具</h2></div>
+  <table>
+    <thead><tr><th>工具</th><th>输入</th><th>返回</th><th>耗时</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><code>news_sentiment</code><br><span class="hint">本地 SVM，不花 API 额度</span></td>
+        <td>字符串数组，每条「标题。正文」</td>
+        <td>正面/中性/负面、−1..1 期望分、置信度</td>
+        <td>约 2 秒</td>
+      </tr>
+      <tr>
+        <td><code>stock_debate</code><br><span class="hint">10 次 LLM 调用</span></td>
+        <td>代码（如 600519.SH）、可选 asof</td>
+        <td>五档评级、仓位、多空与三方风控发言、证据</td>
+        <td>30–60 秒</td>
+      </tr>
+    </tbody>
+  </table>
+  <p class="hint">
+    工具只负责计算，结论仍由 agent 组织；两者都会把结果写进本地 SQLite（辩论进 <code>debate_runs</code>），
+    所以这里能看到 agent 跑过什么。
+  </p>
+</section>
+
+<section class="panel">
+  <div class="panel-head"><h2>怎么跟 agent 说</h2></div>
+  {% for p in prompts %}
+    <p class="hint" style="margin:14px 0 4px"><strong>{{ p.title }}</strong></p>
+    <pre style="white-space:pre-wrap;font-size:12px;line-height:1.7;margin:0">{{ p.text }}</pre>
+  {% endfor %}
+  <p class="hint">
+    复制上面任意一段发给 DSH。没反应时先看两件事：桌面端有没有重启过、这页的安装检查是否全绿。
+  </p>
+</section>
+
+<section class="panel">
+  <div class="panel-head"><h2>边界</h2></div>
+  <table>
+    <tbody>
+      <tr><td style="width:180px">不接实盘</td><td>辩论只输出评级与仓位上限，下单仍要在虚拟盘手动执行。</td></tr>
+      <tr><td>不保证收益</td><td>评级来自规则与 LLM，样本期是下跌市，历史检验没有正收益证据。</td></tr>
+      <tr><td>证据有限</td><td>没有财报、没有社交情绪；新闻只有东财一个来源。</td></tr>
+      <tr><td>低置信复核</td><td>SVM 置信度低于 0.6 的新闻在 <a href="/news">新闻情绪</a> 里标为需人工复核。</td></tr>
+    </tbody>
+  </table>
+</section>
+{% endblock %}

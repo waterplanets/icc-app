@@ -120,9 +120,10 @@ _QUOTE_FIELDS = "f1,f2,f3,f4,f5,f6,f12,f13,f14,f15,f16,f17,f18,f20,f21,f86"
 
 
 def _em_single(sym: str, timeout: float = 8.0) -> Dict[str, Any]:
+    # fltt=2 让接口直接返回小数价格；不加时 f43 是「价格×100」的整数，会把净值放大 100 倍
     url = (f"https://push2.eastmoney.com/api/qt/stock/get?secid={to_secid(sym)}"
            f"&fields=f43,f44,f45,f46,f47,f48,f57,f58,f60,f169,f170,f86"
-           f"&_={int(time.time() * 1000)}")
+           f"&fltt=2&invt=2&_={int(time.time() * 1000)}")
     d = (json.loads(_http(url, timeout=timeout)) or {}).get("data") or {}
     if d.get("f43") in (None, "-"):
         raise FeedError(f"东财无数据: {sym}")
