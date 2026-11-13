@@ -21,6 +21,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import newsfeed
+
 BASE_DIR = Path(__file__).resolve().parent
 CONFIG_PATH = BASE_DIR.parent / "config" / "debate_prompt.yaml"
 API_URL = "https://api.deepseek.com/chat/completions"
@@ -40,6 +42,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "risk_rounds": 1,
     "max_news": 8,
     "max_chars_per_news": 110,
+    "news_max_age_days": 3,
     "language": "中文",
     "roles": {
         "news_analyst": (
@@ -324,17 +327,26 @@ def build_evidence(conn: sqlite3.Connection, symbol: str, asof: str,
 
     limit = int(cfg.get("max_news", 8))
     chars = int(cfg.get("max_chars_per_news", 110))
+    freshness = newsfeed.freshness(
+        conn, symbol, asof, int(cfg.get("news_max_age_days", 3)))
+    if freshness.get("latest"):
+        state = "偏旧" if freshness.get("stale") else "新鲜"
+        age_line = (f"新闻时效：最新 {freshness['latest']}，距 asof "
+                    f"{freshness.get('age_days')} 天，状态 {state}"
+                    f"（阈值 {freshness.get('max_age_days')} 天）")
+    else:
+        age_line = "新闻时效：本地没有已打分的新闻"
     news_rows = conn.execute(
         "SELECT date, title, label, score, confidence FROM news "
         "WHERE symbol=? AND date<=? AND label IS NOT NULL ORDER BY date DESC, time DESC LIMIT ?",
         (symbol, asof, limit)).fetchall()
     if news_rows:
-        news = "\n".join(
+        news = age_line + "\n" + "\n".join(
             f"[{r['date']}] {({'1': '正面', '-1': '负面'}.get(str(r['label']), '中性'))}"
             f"（{r['score']:+.2f}/{r['confidence']:.2f}）{r['title'][:chars]}"
             for r in news_rows)
     else:
-        news = "该标的暂无已打分的新闻"
+        news = age_line + "\n该标的暂无已打分的新闻"
 
     tpl = cfg
     return (str(tpl.get("evidence_header", ""))

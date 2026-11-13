@@ -175,6 +175,29 @@ def rebuild_daily(conn, date: str, symbol: str) -> None:
     conn.commit()
 
 
+def freshness(conn, symbol: str, asof: str, max_age_days: int = 3) -> Dict[str, Any]:
+    """新闻时效：最新一条已打分新闻距 asof 多少天，是否已经偏旧。"""
+    row = conn.execute(
+        "SELECT MAX(date) AS d FROM news WHERE symbol=? AND date<=? AND label IS NOT NULL",
+        (symbol, asof)).fetchone()
+    latest = row["d"] if row else None
+    if not latest:
+        return {"latest": None, "age_days": None, "stale": True, "reason": "no_news"}
+    try:
+        age = (datetime.strptime(asof[:10], "%Y-%m-%d").date()
+               - datetime.strptime(latest, "%Y-%m-%d").date()).days
+    except ValueError:
+        age = None
+    stale = age is None or age > int(max_age_days)
+    return {
+        "latest": latest,
+        "age_days": age,
+        "stale": stale,
+        "max_age_days": int(max_age_days),
+        "reason": "old" if stale else "fresh",
+    }
+
+
 def news_list(conn, asof: str, symbol: Optional[str] = None, limit: int = 80,
               only_scored: bool = False) -> List[Dict[str, Any]]:
     sql = "SELECT * FROM news WHERE date<=?"

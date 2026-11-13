@@ -141,6 +141,20 @@ def _debate_summary(conn: sqlite3.Connection, asof: str) -> Optional[Dict[str, A
     }
 
 
+def cmd_news_status(args: argparse.Namespace) -> Dict[str, Any]:
+    """本地新闻时效：给对话模式先判断“要不要更新”。"""
+    asof = args.asof or datetime.now().strftime("%Y-%m-%d")
+    conn = db.connect()
+    try:
+        fresh = newsfeed.freshness(conn, args.symbol, asof, args.max_age_days)
+        count = conn.execute(
+            "SELECT COUNT(*) FROM news WHERE symbol=? AND date<=? AND label IS NOT NULL",
+            (args.symbol, asof)).fetchone()[0]
+        return {"ok": True, "symbol": args.symbol, "asof": asof, "count": count, **fresh}
+    finally:
+        conn.close()
+
+
 def cmd_search(args: argparse.Namespace) -> Dict[str, Any]:
     """按代码/名称/拼音搜索 A 股，供仪表盘添加自选。"""
     keyword = str(args.keyword or "").strip()
@@ -618,6 +632,12 @@ def main() -> None:
     p.add_argument("--keyword", required=True)
     p.add_argument("--limit", type=int, default=8)
     p.set_defaults(func=cmd_search)
+
+    p = sub.add_parser("news-status")
+    p.add_argument("--symbol", required=True)
+    p.add_argument("--asof", default="")
+    p.add_argument("--max-age-days", type=int, default=3)
+    p.set_defaults(func=cmd_news_status)
 
     p = sub.add_parser("create-account")
     p.add_argument("--name", required=True)
