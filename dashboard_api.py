@@ -141,6 +141,43 @@ def _debate_summary(conn: sqlite3.Connection, asof: str) -> Optional[Dict[str, A
     }
 
 
+def cmd_search(args: argparse.Namespace) -> Dict[str, Any]:
+    """按代码/名称/拼音搜索 A 股，供仪表盘添加自选。"""
+    keyword = str(args.keyword or "").strip()
+    if not keyword:
+        return {"ok": True, "items": []}
+    return {"ok": True, "items": feed.search(keyword, limit=args.limit)}
+
+
+def cmd_watch_add(args: argparse.Namespace) -> Dict[str, Any]:
+    """加自选并补齐数据：3 年日线、快照、可选新闻打分。"""
+    raw = str(args.symbol or "").strip().upper()
+    if re.fullmatch(r"\d{6}", raw):
+        raw = raw + (".SH" if raw.startswith("6") else ".SZ")
+    if not re.fullmatch(r"\d{6}\.(SH|SZ)", raw):
+        return {"ok": False, "code": "BAD_SYMBOL", "error": f"代码格式不对：{args.symbol}"}
+    conn = db.connect()
+    try:
+        name = str(args.name or "").strip()
+        if not name:
+            row = conn.execute("SELECT name FROM instruments WHERE symbol=?", (raw,)).fetchone()
+            name = row[0] if row else ""
+        if not name:
+            try:
+                items = feed.quotes([raw])
+                name = items[0].get("name", "") if items else ""
+            except Exception:  # noqa: BLE001
+                name = ""
+        db.add_instrument(conn, raw, name, "自选")
+        synced = sync.sync_symbol(conn, raw, years=args.years)
+        news = {"fetched": 0, "kept": 0, "scored": 0}
+        if args.with_news:
+            news = newsfeed.sync(conn, [(raw, name or raw)], per_symbol=8)
+        return {"ok": True, "symbol": raw, "name": name or raw, **synced, "news": news}
+    finally:
+        conn.close()
+
+
 def cmd_state(args: argparse.Namespace) -> Dict[str, Any]:
     conn = db.connect()
     try:
@@ -569,6 +606,18 @@ def main() -> None:
     p.add_argument("--account", type=int, default=None)
     p.add_argument("--limit", type=int, default=20)
     p.set_defaults(func=cmd_state)
+
+    p = sub.add_parser("watch-add")
+    p.add_argument("--symbol", required=True)
+    p.add_argument("--name", default="")
+    p.add_argument("--years", type=int, default=3)
+    p.add_argument("--with-news", action="store_true")
+    p.set_defaults(func=cmd_watch_add)
+
+    p = sub.add_parser("search")
+    p.add_argument("--keyword", required=True)
+    p.add_argument("--limit", type=int, default=8)
+    p.set_defaults(func=cmd_search)
 
     p = sub.add_parser("create-account")
     p.add_argument("--name", required=True)

@@ -37,6 +37,33 @@ class FeedError(RuntimeError):
 # --------------------------------------------------------------------------- #
 # 代码归一与限速
 # --------------------------------------------------------------------------- #
+def search(keyword: str, limit: int = 8) -> List[Dict[str, str]]:
+    """按代码/名称/拼音搜索 A 股，返回 [{symbol, name}]。"""
+    token = "D43BF722C8E33BDC906FB84D85E326E8"
+    url = ("https://searchapi.eastmoney.com/api/suggest/get?"
+           f"input={urllib.parse.quote(keyword)}&type=14&token={token}&count={limit}")
+    try:
+        data = json.loads(_http(url, referer="https://quote.eastmoney.com/")) or {}
+    except Exception:  # noqa: BLE001 - 搜索失败按无结果处理
+        return []
+    rows = ((data.get("QuotationCodeTable") or {}).get("Data") or [])
+    out: List[Dict[str, str]] = []
+    for row in rows:
+        code = str(row.get("Code") or "")
+        name = str(row.get("Name") or "")
+        quote_id = str(row.get("QuoteID") or "")
+        if not (len(code) == 6 and name and "." in quote_id):
+            continue
+        market = quote_id.split(".", 1)[0]
+        suffix = {"1": "SH", "0": "SZ"}.get(market)
+        if not suffix:
+            continue
+        out.append({"symbol": f"{code}.{suffix}", "name": name})
+        if len(out) >= limit:
+            break
+    return out
+
+
 def normalize_symbol(sym: str) -> str:
     """`600519` → `600519.SH`；已带后缀的原样返回。"""
     s = (sym or "").strip().upper()
