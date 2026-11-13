@@ -56,7 +56,7 @@
 <section class="panel">
   <div class="panel-head"><h2>组合经理决议</h2></div>
   <p>{{ data.judge.executive_summary }}</p>
-  <table>
+  <table class="wrap">
     <tbody>
       <tr><td style="width:150px">保留的反方意见</td><td>{{ data.judge.keep_dissent or '—' }}</td></tr>
       <tr><td>依赖的关键假设</td><td>{% for a in data.judge.assumptions or [] %}· {{ a }}<br>{% else %}—{% endfor %}</td></tr>
@@ -71,7 +71,7 @@
 
 <section class="panel">
   <div class="panel-head"><h2>风控三方</h2></div>
-  <table>
+  <table class="wrap">
     <thead><tr><th>类型</th><th>立场</th><th>意见</th></tr></thead>
     <tbody>
     {% for label, r in data.risk.items() %}

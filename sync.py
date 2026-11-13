@@ -62,6 +62,26 @@ def sync_all(conn: sqlite3.Connection) -> Dict[str, Any]:
     return {"bars": bars, "quotes": quotes}
 
 
+def sync_symbol(conn: sqlite3.Connection, symbol: str, years: int = 3) -> Dict[str, Any]:
+    """只补一只标的：历史日线 + 实时快照，供对话里按需扩充。"""
+    start = (date.today() - timedelta(days=365 * max(1, int(years)))).isoformat()
+    data = feed.daily_bars(symbol, start=start)
+    rows = db.upsert_bars(conn, symbol, data["rows"])
+    quotes = 0
+    try:
+        items = feed.quotes([symbol])
+        quotes = db.upsert_quotes(conn, items)
+        for q in items:
+            if q.get("name"):
+                conn.execute(
+                    "UPDATE instruments SET name=? WHERE symbol=? AND (name='' OR name=symbol)",
+                    (q["name"], symbol))
+        conn.commit()
+    except Exception:  # noqa: BLE001 - 快照失败不影响历史日线
+        pass
+    return {"symbol": symbol, "bars": rows, "quotes": quotes, "source": data.get("source")}
+
+
 def intraday_snapshot(conn: sqlite3.Connection) -> Dict[str, Any]:
     """盘中轻量快照：只更新报价，不拉日线。"""
     return sync_quotes(conn)

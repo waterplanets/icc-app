@@ -33,8 +33,43 @@ def main() -> None:
     conn = db.connect()
     try:
         asof = args.asof.strip() or db.today_str()
+        bars = conn.execute(
+            "select count(*) from bars where symbol=? and date<=?",
+            (args.symbol, asof),
+        ).fetchone()[0]
+        if bars < 30:
+            # 空工作区直接返回可读原因，避免拿空证据调用整条 LLM 流水线。
+            print(json.dumps({
+                "ok": False,
+                "code": "NEED_DATA",
+                "symbol": args.symbol,
+                "asof": asof,
+                "bars": bars,
+                "error": (
+                    f"{args.symbol} 在 {asof} 之前只有 {bars} 条本地日线（至少需要 30 条），"
+                    "无法评估。请先同步行情：cd <ICC 代码目录> && python app.py --sync"
+                ),
+            }, ensure_ascii=False))
+            return
         c = council.run(conn, asof, symbols=[args.symbol], record=False)
-        res = debate.run(conn, args.symbol, asof, council_payload=c, record=not args.no_record)
+        try:
+            res = debate.run(conn, args.symbol, asof, council_payload=c,
+                             record=not args.no_record)
+        except debate.DebateError as e:
+            msg = str(e)
+            print(json.dumps({
+                "ok": False,
+                "code": "NEED_API_KEY" if "DEEPSEEK_API_KEY" in msg else "LLM_ERROR",
+                "symbol": args.symbol,
+                "asof": asof,
+                "error": msg,
+                "hint": (
+                    "辩论需要 DeepSeek API：把密钥写入环境变量 DEEPSEEK_API_KEY，"
+                    "或 DSH 的 ~/.dsh/.credentials.yaml；也支持在 "
+                    "config/debate_prompt.yaml 里改 model / base_url"
+                ),
+            }, ensure_ascii=False))
+            return
         print(json.dumps(res, ensure_ascii=False))
     finally:
         conn.close()

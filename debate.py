@@ -33,6 +33,7 @@ class DebateError(RuntimeError):
 DEFAULT_CONFIG: Dict[str, Any] = {
     "pipeline": "full",
     "model": "deepseek-chat",
+    "base_url": API_URL,
     "temperature": 0.6,
     "max_tokens": 800,
     "max_debate_rounds": 1,
@@ -247,7 +248,8 @@ def chat(cfg: Dict[str, Any], system: str, user: str, json_mode: bool = True) ->
         # DeepSeek 的 json_object 模式要求提示词里出现 "json"，自由发言的角色不能带
         payload["response_format"] = {"type": "json_object"}
     body = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(API_URL, data=body, headers={
+    url = str(cfg.get("base_url") or API_URL).strip()
+    req = urllib.request.Request(url, data=body, headers={
         "Authorization": f"Bearer {api_key()}", "Content-Type": "application/json"})
     for attempt in range(2):
         try:
