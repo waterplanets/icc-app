@@ -336,14 +336,17 @@ def build_evidence(conn: sqlite3.Connection, symbol: str, asof: str,
                     f"（阈值 {freshness.get('max_age_days')} 天）")
     else:
         age_line = "新闻时效：本地没有已打分的新闻"
-    news_rows = conn.execute(
-        "SELECT date, title, label, score, confidence FROM news "
-        "WHERE symbol=? AND date<=? AND label IS NOT NULL ORDER BY date DESC, time DESC LIMIT ?",
-        (symbol, asof, limit)).fetchall()
+    if not freshness.get("covered", True):
+        age_line += (f"\n注意：本地新闻库最早只到 {freshness.get('first') or '—'}，"
+                     f"窗口 {freshness.get('window_start')}..{asof} 未被完整覆盖，"
+                     "查不到不等于没有新闻")
+    news_rows = newsfeed.news_list(conn, asof, symbol=symbol, limit=limit,
+                                   only_scored=True)
     if news_rows:
         news = age_line + "\n" + "\n".join(
             f"[{r['date']}] {({'1': '正面', '-1': '负面'}.get(str(r['label']), '中性'))}"
-            f"（{r['score']:+.2f}/{r['confidence']:.2f}）{r['title'][:chars]}"
+            f"（{float(r.get('score') or 0):+.2f}/{float(r.get('confidence') or 0):.2f}）"
+            f"{r['title'][:chars]}"
             for r in news_rows)
     else:
         news = age_line + "\n该标的暂无已打分的新闻"

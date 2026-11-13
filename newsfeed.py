@@ -14,7 +14,7 @@ import re
 import sys
 import urllib.parse
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -26,10 +26,72 @@ UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
 MACRO_KEYWORDS = ("A股 收盘", "央行 降准 降息")
 CONF_REVIEW = 0.60          # 低于此置信度进人工复核队列
 SIGNAL_MIN_N = 2            # 少于几条新闻不出信号
+MARKET_CLOSE = (15, 0)      # A股收盘；回放模式当日的硬上界
 
 
 class NewsError(RuntimeError):
     pass
+
+
+def _parse_dt(value: Any) -> Optional[datetime]:
+    """解析东财的时间串，兼容到秒/到分/只有日期三种精度。"""
+    s = str(value or "").strip()
+    for fmt, n in (("%Y-%m-%d %H:%M:%S", 19), ("%Y-%m-%d %H:%M", 16), ("%Y-%m-%d", 10)):
+        try:
+            return datetime.strptime(s[:n], fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def _pub_dt(row: Dict[str, Any]) -> Optional[datetime]:
+    """新闻发布时间：优先带时分秒的 time，退回 date；都缺失则为 None。"""
+    return _parse_dt(row.get("time")) or _parse_dt(row.get("date"))
+
+
+def _effective_dt(row: Dict[str, Any]) -> datetime:
+    """这条新闻计入情绪聚合的时点。
+
+    盘后发布顺延到次日；没有日期的按入库时间处理，因此回填的历史新闻不会被
+    错误地算进更早的交易日。
+    """
+    pub = _pub_dt(row)
+    if pub is None:
+        pub = _parse_dt(row.get("fetched_at")) or datetime.now()
+    if (pub.hour, pub.minute) > MARKET_CLOSE:
+        pub += timedelta(days=1)
+    return pub
+
+
+def _effective_date(row: Dict[str, Any]) -> str:
+    return _effective_dt(row).date().isoformat()
+
+
+def is_live(asof: str) -> bool:
+    """asof 是否已经到当下（实时模式）。"""
+    return asof >= datetime.now().strftime("%Y-%m-%d")
+
+
+def _cutoff(asof: str, live: bool) -> datetime:
+    """回放模式以上市日收盘为界，实时模式以当前时刻为界。"""
+    if live:
+        return datetime.now()
+    return datetime.strptime(asof, "%Y-%m-%d").replace(
+        hour=MARKET_CLOSE[0], minute=MARKET_CLOSE[1], second=0, microsecond=0)
+
+
+def in_window(row: Dict[str, Any], asof: str, lookback_days: int = 30,
+              live: Optional[bool] = None) -> bool:
+    """新闻是否落在 [asof - lookback, asof 收盘] 内。
+
+    无发布时间的新闻只在实时模式保留：历史回放里无法证明它不是未来信息。
+    """
+    live = is_live(asof) if live is None else live
+    end = _cutoff(asof, live)
+    pub = _pub_dt(row)
+    if pub is None:
+        return live
+    return end - timedelta(days=lookback_days) <= pub <= end
 
 
 def _http(url: str, referer: str = "https://so.eastmoney.com/", timeout: float = 12.0) -> str:
@@ -142,7 +204,9 @@ def sync(conn, symbols: List[Tuple[str, str]], per_symbol: int = 8,
              r.get("media"), r.get("url"), r.get("label"), r.get("score"), r.get("confidence"), now))
     conn.commit()
 
-    pairs = {(r["date"], r["symbol"]) for r in rows if r.get("symbol") and r.get("label") is not None}
+    # 盘后新闻归到次日、无日期新闻归到入库日，避免改写更早的交易情绪。
+    pairs = {(_effective_date(r), r["symbol"]) for r in rows
+             if r.get("symbol") and r.get("label") is not None}
     for d, s in pairs:
         rebuild_daily(conn, d, s)
 
@@ -154,9 +218,10 @@ def sync(conn, symbols: List[Tuple[str, str]], per_symbol: int = 8,
 
 
 def rebuild_daily(conn, date: str, symbol: str) -> None:
-    rows = conn.execute(
-        "SELECT label, score, confidence FROM news WHERE date=? AND symbol=? AND label IS NOT NULL",
-        (date, symbol)).fetchall()
+    rows = [dict(r) for r in conn.execute(
+        "SELECT label, score, confidence, date, time, fetched_at FROM news "
+        "WHERE symbol=? AND label IS NOT NULL", (symbol,)).fetchall()]
+    rows = [r for r in rows if _effective_date(r) == date]
     if not rows:
         return
     labels = [int(r["label"]) for r in rows]
@@ -165,51 +230,89 @@ def rebuild_daily(conn, date: str, symbol: str) -> None:
     # 置信度加权：低置信新闻对当日情绪的贡献按比例缩小
     w = [max(c, 0.05) for c in confs]
     avg = sum(s * wi for s, wi in zip(scores, w)) / sum(w)
+    # 历史交易日只写一次：之后补抓/重训都不得改写当时的输入。
+    historical = date < datetime.now().strftime("%Y-%m-%d")
+    conflict = ("DO NOTHING" if historical else
+                "DO UPDATE SET n=excluded.n,pos=excluded.pos,neu=excluded.neu,"
+                "neg=excluded.neg,avg_score=excluded.avg_score,avg_conf=excluded.avg_conf")
     conn.execute(
-        """INSERT INTO sentiment_daily(date,symbol,n,pos,neu,neg,avg_score,avg_conf)
-           VALUES(?,?,?,?,?,?,?,?)
-           ON CONFLICT(date,symbol) DO UPDATE SET n=excluded.n,pos=excluded.pos,neu=excluded.neu,
-               neg=excluded.neg,avg_score=excluded.avg_score,avg_conf=excluded.avg_conf""",
+        f"""INSERT INTO sentiment_daily(date,symbol,n,pos,neu,neg,avg_score,avg_conf)
+            VALUES(?,?,?,?,?,?,?,?)
+            ON CONFLICT(date,symbol) {conflict}""",
         (date, symbol, len(labels), labels.count(1), labels.count(0), labels.count(-1),
          round(avg, 4), round(sum(confs) / len(confs), 4)))
     conn.commit()
 
 
+def rebuild_all(conn) -> int:
+    """按“收盘时点”口径重算全部日度情绪。
+
+    迁移/换模型后手工执行一次；之后 rebuild_daily 对历史日期只写一次，
+    不会再有回填改写。
+    """
+    pairs = {(_effective_date(dict(r)), r["symbol"]) for r in conn.execute(
+        "SELECT date, time, fetched_at, symbol FROM news "
+        "WHERE symbol IS NOT NULL AND label IS NOT NULL").fetchall()}
+    if not pairs:
+        return 0
+    conn.execute("DELETE FROM sentiment_daily")
+    for d, s in pairs:
+        rebuild_daily(conn, d, s)
+    conn.commit()
+    return len(pairs)
+
+
 def freshness(conn, symbol: str, asof: str, max_age_days: int = 3) -> Dict[str, Any]:
     """新闻时效：最新一条已打分新闻距 asof 多少天，是否已经偏旧。"""
     row = conn.execute(
-        "SELECT MAX(date) AS d FROM news WHERE symbol=? AND date<=? AND label IS NOT NULL",
+        "SELECT MIN(date) AS first, MAX(date) AS last FROM news "
+        "WHERE symbol=? AND date<>'' AND date<=? AND label IS NOT NULL",
         (symbol, asof)).fetchone()
-    latest = row["d"] if row else None
+    first = row["first"] if row else None
+    latest = row["last"] if row else None
+    window_start = (datetime.strptime(asof[:10], "%Y-%m-%d").date()
+                    - timedelta(days=int(max_age_days))).isoformat()
+    # 库内最早一条都晚于窗口起点，说明这个窗口新闻源根本没覆盖到，
+    # 不能把“查不到”当成“没有新闻”。
+    covered = bool(first and first <= window_start)
     if not latest:
-        return {"latest": None, "age_days": None, "stale": True, "reason": "no_news"}
+        return {"latest": None, "age_days": None, "stale": True,
+                "reason": "no_news", "covered": False, "first": None,
+                "window_start": window_start}
     try:
         age = (datetime.strptime(asof[:10], "%Y-%m-%d").date()
                - datetime.strptime(latest, "%Y-%m-%d").date()).days
     except ValueError:
         age = None
     stale = age is None or age > int(max_age_days)
+    reason = "source_gap" if not covered else ("old" if stale else "fresh")
     return {
         "latest": latest,
+        "first": first,
         "age_days": age,
         "stale": stale,
+        "covered": covered,
+        "window_start": window_start,
         "max_age_days": int(max_age_days),
-        "reason": "old" if stale else "fresh",
+        "reason": reason,
     }
 
 
 def news_list(conn, asof: str, symbol: Optional[str] = None, limit: int = 80,
-              only_scored: bool = False) -> List[Dict[str, Any]]:
-    sql = "SELECT * FROM news WHERE date<=?"
-    args: List[Any] = [asof]
+              only_scored: bool = False, lookback_days: int = 3650) -> List[Dict[str, Any]]:
+    """按 asof 的收盘时点取新闻：未来条目、回放里的无日期条目都会在这里被挡掉。"""
+    sql = "SELECT * FROM news WHERE 1=1"
+    args: List[Any] = []
     if symbol:
         sql += " AND symbol=?"
         args.append(symbol)
     if only_scored:
         sql += " AND label IS NOT NULL"
-    sql += " ORDER BY date DESC, time DESC LIMIT ?"
-    args.append(limit)
-    return [dict(r) for r in conn.execute(sql, args).fetchall()]
+    rows = [dict(r) for r in conn.execute(sql, args).fetchall()]
+    live = is_live(asof)
+    rows = [r for r in rows if in_window(r, asof, lookback_days, live)]
+    rows.sort(key=lambda r: str(r.get("time") or r.get("date") or ""), reverse=True)
+    return rows[:limit]
 
 
 def daily_rows(conn, asof: str, symbol: Optional[str] = None, days: int = 15) -> List[Dict[str, Any]]:

@@ -147,9 +147,13 @@ def cmd_news_status(args: argparse.Namespace) -> Dict[str, Any]:
     conn = db.connect()
     try:
         fresh = newsfeed.freshness(conn, args.symbol, asof, args.max_age_days)
-        count = conn.execute(
-            "SELECT COUNT(*) FROM news WHERE symbol=? AND date<=? AND label IS NOT NULL",
-            (args.symbol, asof)).fetchone()[0]
+        # 与页面/辩论用同一套窗口过滤，避免“库里 8 条、实际可用 7 条”的口径差。
+        count = len(newsfeed.news_list(conn, asof, symbol=args.symbol,
+                                       limit=1_000_000, only_scored=True))
+        # 插件输出 schema 只声明单一类型，这里把空值归一化，避免 null 触发校验失败。
+        fresh["latest"] = fresh.get("latest") or ""
+        fresh["first"] = fresh.get("first") or ""
+        fresh["age_days"] = fresh.get("age_days") if fresh.get("age_days") is not None else -1
         return {"ok": True, "symbol": args.symbol, "asof": asof, "count": count, **fresh}
     finally:
         conn.close()
